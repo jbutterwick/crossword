@@ -77,9 +77,30 @@ impl Puzzle {
         self.grid().is_filled() && *self.grid() == self.puz.solution
     }
 
+    /// Whether the solver has entered any letters yet. Used to distinguish an
+    /// untouched puzzle from one in progress.
+    pub fn is_started(&self) -> bool {
+        self.grid()
+            .0
+            .iter()
+            .flatten()
+            .any(|sq| matches!(sq, Square::Letter(_)))
+    }
+
+    /// Serializes the puzzle (including the current solve state) back into the
+    /// bytes of a `.puz` file, so progress can be saved to disk.
+    pub fn to_puz_bytes(&self) -> Vec<u8> {
+        self.puz.serialize()
+    }
+
     /// Returns a reference to the current puzzle grid.
     pub fn grid(&self) -> &Grid {
         &self.puz.solve_state
+    }
+
+    /// The position of the currently-highlighted square.
+    pub fn cursor_pos(&self) -> Pos {
+        self.cursor.pos
     }
 
     pub fn title(&self) -> &str {
@@ -188,6 +209,18 @@ impl Puzzle {
         self.puz.solve_state.set(self.cursor.pos, Square::Empty);
     }
 
+    /// Clears every entered letter, returning the puzzle to its not-started
+    /// state, and resets the cursor to the start of the grid.
+    pub fn reset(&mut self) {
+        let positions: Vec<Pos> = self.puz.solve_state.positions().collect();
+        for pos in positions {
+            if self.puz.solve_state.get(pos).is_white() {
+                self.puz.solve_state.set(pos, Square::Empty);
+            }
+        }
+        self.cursor = Cursor::from_grid(&self.puz.solve_state);
+    }
+
     /// Moves the cursor back one square, if possible. That is, one square to the left if
     /// the current cursor direction is Across, and one square up, if the current direction
     /// is down.
@@ -229,6 +262,26 @@ impl Puzzle {
     }
     pub fn cursor_direction(&self) -> Direction {
         self.cursor.direction
+    }
+
+    /// Moves the cursor to the first square of the current word.
+    pub fn cursor_to_word_start(&mut self) {
+        self.cursor.pos = self.puz.solve_state.get_start(&self.cursor);
+    }
+
+    /// Moves the cursor to the last square of the current word.
+    pub fn cursor_to_word_end(&mut self) {
+        self.cursor.pos = self.puz.solve_state.get_end(&self.cursor);
+    }
+
+    /// Moves the cursor to an arbitrary square (e.g. from a mouse click),
+    /// keeping the current direction if valid there and flipping it otherwise.
+    /// Black squares are ignored.
+    pub fn move_cursor_to(&mut self, pos: Pos) {
+        if self.puz.solve_state.get(pos).is_white() {
+            self.cursor.pos = pos;
+            self.cursor.adjust_direction(&self.puz.solve_state);
+        }
     }
 }
 
@@ -321,6 +374,21 @@ impl Grid {
         }
 
         Self(grid)
+    }
+
+    /// Serializes the grid back to `.puz` cell bytes (row-major): `.` for black,
+    /// `-` for empty, the letter byte otherwise. Inverse of [`Grid::parse`].
+    fn to_bytes(&self) -> Vec<u8> {
+        self.0
+            .iter()
+            .flatten()
+            .map(|sq| match sq {
+                Square::Black => b'.',
+                Square::Empty => b'-',
+                // Letters came from a single .puz byte (0..=255), so this round-trips.
+                Square::Letter(c) => *c as u8,
+            })
+            .collect()
     }
 
     /// The size of this grid, expressed as (width, height).
@@ -498,6 +566,25 @@ impl Grid {
                 pos = (row - 1, col);
             },
         }
+    }
+
+    /// Determines the position of the last square of the word that contains the
+    /// cursor, in the same direction as the cursor.
+    fn get_end(&self, cursor: &Cursor) -> Pos {
+        let (mut row, mut col) = cursor.pos;
+        match cursor.direction {
+            Across => {
+                while self.right_neighbor((row, col)).is_white() {
+                    col += 1;
+                }
+            }
+            Down => {
+                while self.down_neighbor((row, col)).is_white() {
+                    row += 1;
+                }
+            }
+        }
+        (row, col)
     }
 }
 
@@ -728,9 +815,6 @@ pub enum Error {
     EofError(usize),
     /// Something went wrong while parsing a .puz file.
     ParseError(String),
-    /// Got an error while decoding a string, possibly because it was incorrectly
-    /// encoded or because this library attempted to use the wrong encoding.
-    EncodingError(String),
     /// The given puz file was marked as "scrambled" which this crate doesn't support.
     ScrambledError,
     /// An [I/O error](std::io::Error) occurred.
@@ -746,6 +830,33 @@ impl From<std::io::Error> for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reset_clears_progress() {
+        let data = std::fs::read("puzzles/version-1.2-puzzle.puz").unwrap();
+        let (mut puzzle, _) = Puzzle::parse(data).unwrap();
+        // The sample's solve state already has letters filled in.
+        assert!(puzzle.is_started());
+
+        puzzle.reset();
+
+        assert!(!puzzle.is_started());
+        // Black squares are untouched, so the grid still matches the solution shape.
+        assert_eq!(puzzle.grid().size(), puzzle.puz.solution.size());
+    }
+
+    #[test]
+    fn word_start_and_end() {
+        let grid = basic_grid();
+        // Across word on the all-white bottom row spans the whole row.
+        let across = Cursor { pos: (3, 2), direction: Across };
+        assert_eq!(grid.get_start(&across), (3, 0));
+        assert_eq!(grid.get_end(&across), (3, 3));
+        // Down word in the first column spans every row.
+        let down = Cursor { pos: (1, 0), direction: Down };
+        assert_eq!(grid.get_start(&down), (0, 0));
+        assert_eq!(grid.get_end(&down), (3, 0));
+    }
 
     fn basic_grid() -> Grid {
         let grid_bytes = b"--.---.--.------";

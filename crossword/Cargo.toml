@@ -9,4 +9,3 @@ repository.workspace = true
 edition.workspace = true
 
 [dependencies]
-encoding = "0.2"

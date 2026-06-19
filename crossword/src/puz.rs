@@ -1,10 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 
-use encoding::DecoderTrap::Strict;
-use encoding::Encoding;
-use encoding::all::{ISO_8859_1, UTF_8};
-
 use crate::Direction::{Across, Down};
 use crate::{ClueIdentifier, checksum::*};
 use crate::{Error, Grid, Pos};
@@ -154,41 +150,140 @@ impl Puz {
             }
         }
 
-        let clues = clues
-            .into_iter()
-            .map(|clue| decode_str(&clue))
-            .collect::<Result<Vec<String>, _>>()?;
+        let clues: Vec<String> = clues.iter().map(|clue| decode_str(clue)).collect();
 
         let (numbered_squares, clues) = allocate_clues(&solution, &clues);
 
         let puz = Self {
             solution,
             solve_state,
-            title: decode_str(&title)?,
-            author: decode_str(&author)?,
-            copyright: decode_str(&copyright)?,
-            notes: decode_str(&notes)?,
+            title: decode_str(&title),
+            author: decode_str(&author),
+            copyright: decode_str(&copyright),
+            notes: decode_str(&notes),
             numbered_squares,
             clues,
         };
         Ok((puz, checksum_mismatches))
     }
+
+    /// Serializes this puzzle back into `.puz` file bytes, recomputing all
+    /// checksums so the result is internally consistent and re-parseable.
+    ///
+    /// Header fields the parser ignores (version, reserved, scrambled checksum,
+    /// the unknown bitmask) are written as fixed zero/`1.3` values rather than
+    /// preserved, so this is a semantic round-trip, not a byte-for-byte one.
+    pub(crate) fn serialize(&self) -> Vec<u8> {
+        let solution_bytes = self.solution.to_bytes();
+        let solve_state_bytes = self.solve_state.to_bytes();
+        let (width, height) = self.solution.size();
+
+        // Strings as NUL-terminated UTF-8.
+        let nul = |s: &str| {
+            let mut b = s.as_bytes().to_vec();
+            b.push(0);
+            b
+        };
+        let title = nul(&self.title);
+        let author = nul(&self.author);
+        let copyright = nul(&self.copyright);
+        let notes = nul(&self.notes);
+        let clues: Vec<Vec<u8>> = self.clues_in_file_order().iter().map(|c| nul(c)).collect();
+        let num_clues = clues.len() as u16;
+
+        // The CIB checksum covers the 8 header bytes at 0x2C..0x34. We write the
+        // bitmask and scrambled tag as 0, so compute over the same bytes.
+        let mut header_2c = vec![width as u8, height as u8];
+        header_2c.extend_from_slice(&num_clues.to_le_bytes());
+        header_2c.extend_from_slice(&[0, 0]); // bitmask
+        header_2c.extend_from_slice(&[0, 0]); // scrambled tag
+        let cib = checksum_region(&header_2c, 0);
+
+        let overall = {
+            let mut c = checksum_region(&solution_bytes, cib);
+            c = checksum_region(&solve_state_bytes, c);
+            c = checksum_metadata_string(&title, c);
+            c = checksum_metadata_string(&author, c);
+            c = checksum_metadata_string(&copyright, c);
+            for clue in &clues {
+                c = checksum_clue(clue, c);
+            }
+            checksum_metadata_string(&notes, c)
+        };
+
+        let solution_checksum = checksum_region(&solution_bytes, 0);
+        let grid_checksum = checksum_region(&solve_state_bytes, 0);
+        let partial_board_checksum = {
+            let mut c = checksum_metadata_string(&title, 0);
+            c = checksum_metadata_string(&author, c);
+            c = checksum_metadata_string(&copyright, c);
+            for clue in &clues {
+                c = checksum_clue(clue, c);
+            }
+            checksum_metadata_string(&notes, c)
+        };
+        let masked = [
+            0x49 ^ (cib & 0xFF) as u8,
+            0x43 ^ (solution_checksum & 0xFF) as u8,
+            0x48 ^ (grid_checksum & 0xFF) as u8,
+            0x45 ^ (partial_board_checksum & 0xFF) as u8,
+            0x41 ^ ((cib & 0xFF00) >> 8) as u8,
+            0x54 ^ ((solution_checksum & 0xFF00) >> 8) as u8,
+            0x45 ^ ((grid_checksum & 0xFF00) >> 8) as u8,
+            0x44 ^ ((partial_board_checksum & 0xFF00) >> 8) as u8,
+        ];
+
+        let mut out = Vec::new();
+        out.extend_from_slice(&overall.to_le_bytes()); // 0x00
+        out.extend_from_slice(b"ACROSS&DOWN\0"); // 0x02
+        out.extend_from_slice(&cib.to_le_bytes()); // 0x0E
+        out.extend_from_slice(&masked); // 0x10
+        out.extend_from_slice(b"1.3\0"); // 0x18 version
+        out.extend_from_slice(&[0, 0]); // 0x1C reserved
+        out.extend_from_slice(&[0, 0]); // 0x1E scrambled checksum
+        out.extend_from_slice(&[0; 12]); // 0x20..0x2C
+        out.extend_from_slice(&header_2c); // 0x2C..0x34 (width/height/clues/bitmask/scrambled tag)
+        out.extend_from_slice(&solution_bytes);
+        out.extend_from_slice(&solve_state_bytes);
+        out.extend_from_slice(&title);
+        out.extend_from_slice(&author);
+        out.extend_from_slice(&copyright);
+        for clue in &clues {
+            out.extend_from_slice(clue);
+        }
+        out.extend_from_slice(&notes);
+        out
+    }
+
+    /// Clues in the order they appear in a `.puz` file: scanning the grid
+    /// top-to-bottom, left-to-right, across before down at each numbered square.
+    /// Mirrors the consumption order in [`allocate_clues`].
+    fn clues_in_file_order(&self) -> Vec<&String> {
+        let mut out = Vec::with_capacity(self.clues.len());
+        for pos in self.solution.positions() {
+            let num = match self.numbered_squares.get(&pos) {
+                Some(n) => *n,
+                None => continue,
+            };
+            if self.solution.starts_across(pos) {
+                out.push(self.clues.get(&(num, Across)).unwrap());
+            }
+            if self.solution.starts_down(pos) {
+                out.push(self.clues.get(&(num, Down)).unwrap());
+            }
+        }
+        out
+    }
 }
 
-/// Turns a NUL-terminated string into a standard String. Uses UTF-8 first, and then
-/// ISO-8859-1 if that fails.
-fn decode_str(bytes: &[u8]) -> Result<String, Error> {
+/// Turns a NUL-terminated string into a standard String. Tries UTF-8, falling
+/// back to ISO-8859-1 (where every byte maps directly to the same codepoint, so
+/// it never fails).
+fn decode_str(bytes: &[u8]) -> String {
     assert_eq!(0x0, *bytes.last().unwrap());
 
     let bytes = &bytes[0..bytes.len() - 1];
-    UTF_8.decode(bytes, Strict).or_else(|_| {
-        ISO_8859_1.decode(bytes, Strict).map_err(|e| {
-            Error::EncodingError(format!(
-                "Failed parsing '{:?}' after trying UTF-8 and ISO-8859: {}",
-                bytes, e
-            ))
-        })
-    })
+    String::from_utf8(bytes.to_vec()).unwrap_or_else(|_| bytes.iter().map(|&b| b as char).collect())
 }
 
 fn allocate_clues(
@@ -408,5 +503,25 @@ mod tests {
             "■P  ■\n",
           )
         );
+    }
+
+    #[test]
+    fn serialize_round_trips() {
+        let data: Vec<u8> = fs::read("puzzles/version-1.2-puzzle.puz").unwrap();
+        let (puz, _) = Puz::parse(data).unwrap();
+
+        let bytes = puz.serialize();
+        let (reparsed, mismatches) = Puz::parse(bytes).unwrap();
+
+        // A re-parse of our output must have valid checksums and identical content.
+        assert_eq!(mismatches, []);
+        assert_eq!(reparsed.solution.to_string(), puz.solution.to_string());
+        assert_eq!(reparsed.solve_state.to_string(), puz.solve_state.to_string());
+        assert_eq!(reparsed.title, puz.title);
+        assert_eq!(reparsed.author, puz.author);
+        assert_eq!(reparsed.copyright, puz.copyright);
+        assert_eq!(reparsed.notes, puz.notes);
+        assert_eq!(reparsed.clues, puz.clues);
+        assert_eq!(reparsed.numbered_squares, puz.numbered_squares);
     }
 }
