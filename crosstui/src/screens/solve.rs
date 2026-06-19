@@ -117,6 +117,7 @@ impl SolveScreen {
             }
             KeyCode::Delete => self.puzzle.erase_letter(),
             KeyCode::Tab => self.puzzle.advance_cursor_to_next_word(),
+            KeyCode::BackTab => self.puzzle.retreat_cursor_to_prev_word(),
             KeyCode::Char(' ') => self.puzzle.swap_cursor_direction(),
             KeyCode::Char('+') | KeyCode::Char('=') => self.zoom_in(),
             KeyCode::Char('-') | KeyCode::Char('_') => self.zoom_out(),

@@ -240,6 +240,11 @@ impl Puzzle {
         self.cursor.advance_to_next_word(&self.puz.solve_state);
     }
 
+    /// Moves the cursor to the previous word in the puzzle.
+    pub fn retreat_cursor_to_prev_word(&mut self) {
+        self.cursor.retreat_to_prev_word(&self.puz.solve_state);
+    }
+
     /// Attempts to swap the cursor direction. However, if the current square is
     /// only part of an across clue, the direction cannot be switched to down,
     /// and vice versa.
@@ -772,6 +777,45 @@ impl Cursor {
         unreachable!();
     }
 
+    /// The inverse of [`advance_to_next_word`](Self::advance_to_next_word): moves
+    /// to the start of the previous word in the same direction, or if already on
+    /// the first word, to the last word of the other direction.
+    fn retreat_to_prev_word(&mut self, grid: &Grid) {
+        let current_start = grid.get_start(self);
+
+        // The last word start, in this direction, before the current word.
+        let mut prev = None;
+        for pos in grid.positions() {
+            if pos == current_start {
+                break;
+            }
+            if grid.starts(pos, self.direction) {
+                prev = Some(pos);
+            }
+        }
+        if let Some(pos) = prev {
+            self.pos = pos;
+            return;
+        }
+
+        // No earlier word in this direction; wrap to the other direction's last word.
+        let mut last = None;
+        for pos in grid.positions() {
+            if grid.starts(pos, !self.direction) {
+                last = Some(pos);
+            }
+        }
+        if let Some(pos) = last {
+            *self = Cursor {
+                pos,
+                direction: !self.direction,
+            };
+            return;
+        }
+
+        unreachable!();
+    }
+
     fn backup(&mut self, grid: &Grid) {
         match self.direction {
             Across => self.left(grid),
@@ -843,6 +887,27 @@ mod tests {
         assert!(!puzzle.is_started());
         // Black squares are untouched, so the grid still matches the solution shape.
         assert_eq!(puzzle.grid().size(), puzzle.puz.solution.size());
+    }
+
+    #[test]
+    fn retreat_is_inverse_of_advance() {
+        let grid = basic_grid();
+
+        // Previous word in the same direction.
+        let mut cursor = Cursor { pos: (1, 0), direction: Across };
+        cursor.retreat_to_prev_word(&grid);
+        assert_eq!(cursor, Cursor { pos: (0, 0), direction: Across });
+
+        // From the first Across word, wrap back to the last Down word.
+        let mut cursor = Cursor { pos: (0, 0), direction: Across };
+        cursor.retreat_to_prev_word(&grid);
+        assert_eq!(cursor, Cursor { pos: (2, 2), direction: Down });
+
+        // advance then retreat returns to the starting word.
+        let mut cursor = Cursor { pos: (0, 0), direction: Across };
+        cursor.advance_to_next_word(&grid);
+        cursor.retreat_to_prev_word(&grid);
+        assert_eq!(cursor, Cursor { pos: (0, 0), direction: Across });
     }
 
     #[test]
