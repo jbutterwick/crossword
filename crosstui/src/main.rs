@@ -9,6 +9,7 @@ mod app;
 mod download;
 mod screens;
 mod storage;
+mod theme;
 
 use app::{App, load_puzzle};
 
@@ -28,6 +29,14 @@ struct Cli {
 fn main() -> io::Result<()> {
     let args = Cli::parse();
     let library_dir = storage::library_dir();
+
+    // Apply the previously selected theme, if any.
+    let themes = theme::load(&library_dir);
+    if let Some(name) = theme::load_selected(&library_dir) {
+        if let Some(entry) = themes.iter().find(|e| e.name == name) {
+            theme::set(entry.theme);
+        }
+    }
 
     let app = match args.path {
         Some(path) => {

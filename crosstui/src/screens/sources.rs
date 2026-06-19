@@ -10,6 +10,7 @@ use ratatui_macros::line;
 
 use crate::app::Transition;
 use crate::download::{self, SOURCES};
+use crate::theme;
 
 #[derive(Clone)]
 enum DownloadState {
@@ -57,13 +58,14 @@ impl SourcesScreen {
     }
 
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
+        let t = theme::current();
         let [title_area, list_area, footer_area] = area.layout(&Layout::vertical([
             Constraint::Length(2),
             Constraint::Fill(1),
             Constraint::Length(2),
         ]));
 
-        Line::from("Download puzzles".bold().light_blue())
+        Line::from("Download puzzles".bold().fg(t.accent()))
             .centered()
             .render(title_area, buf);
 
@@ -71,25 +73,24 @@ impl SourcesScreen {
         list_state.select(Some(self.selected));
         let rows = SOURCES.iter().enumerate().map(|(i, source)| {
             let status = match &self.states[i] {
-                DownloadState::Idle => "".gray(),
-                DownloadState::Done => "✓ downloaded".green(),
-                DownloadState::Failed(e) => format!("✗ {e}").red(),
+                DownloadState::Idle => "".fg(t.muted),
+                DownloadState::Done => "✓ downloaded".fg(t.green),
+                DownloadState::Failed(e) => format!("✗ {e}").fg(t.red),
             };
             line![format!("{:<18}", source.name), status]
         });
 
         let list = List::new(rows)
-            .highlight_style(Style::default().black().on_light_yellow().bold())
+            .highlight_style(Style::new().fg(t.sel_fg()).bg(t.sel_bg()).bold())
             .block(
                 Block::bordered()
+                    .border_style(Style::new().fg(t.muted))
                     .title(" Sources ")
                     .padding(Padding::uniform(1)),
             );
         StatefulWidget::render(list, list_area, buf, &mut list_state);
 
-        Paragraph::new(
-            "↑/↓ move   Enter download   b/Esc back   q quit".gray(),
-        )
-        .render(footer_area, buf);
+        Paragraph::new("↑/↓ move   Enter download   b/Esc back   q quit".fg(t.muted))
+            .render(footer_area, buf);
     }
 }

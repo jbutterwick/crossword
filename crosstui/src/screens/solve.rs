@@ -5,12 +5,13 @@ use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKin
 use crossword::{Direction, Puzzle, Square, SquareStyle};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Style, Stylize};
+use ratatui::style::{Style, Stylize};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, List, ListState, Padding, Paragraph, StatefulWidget, Widget, Wrap};
 use ratatui_macros::{line, text};
 
 use crate::app::Transition;
+use crate::theme;
 
 /// One grid cell's footprint: `w`×`h` characters plus trailing gaps.
 #[derive(Clone, Copy)]
@@ -208,12 +209,13 @@ impl SolveScreen {
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
+        let t = theme::current();
         let vertical = Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]);
         let [title_area, main_area] = area.layout(&vertical);
 
         let title = text![
             "",
-            line!["Crosstui".light_blue(), ": ", self.puzzle.title()]
+            line!["Crosstui".fg(t.accent()), ": ", self.puzzle.title()]
                 .bold()
                 .centered(),
         ];
@@ -242,7 +244,7 @@ impl SolveScreen {
         let instructions = line![
             "Instructions: ".bold(),
             "Arrows/space/tab to navigate. +/- to zoom, 0 to fit. Escape returns to the library."
-                .gray(),
+                .fg(t.muted),
         ];
         Paragraph::new(instructions)
             .wrap(Wrap::default())
@@ -259,7 +261,7 @@ impl SolveScreen {
         } else {
             let (num, direction) = self.puzzle.current_clue_identifier();
             Paragraph::new(line![
-                format!("{}{}", num, direction.to_char()).light_red(),
+                format!("{}{}", num, direction.to_char()).fg(t.clue_number()),
                 ". ",
                 self.puzzle.current_clue()
             ])
@@ -437,6 +439,7 @@ impl<'a> ClueList<'a> {
 
 impl Widget for ClueList<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        let t = theme::current();
         let current_clue_identifier = self.puzzle.current_clue_identifier();
         let cross_clue_identifier = self.puzzle.cross_clue_identifier();
 
@@ -466,18 +469,19 @@ impl Widget for ClueList<'_> {
                 } else {
                     clue
                 };
-                line![num.to_string().light_red(), ". ", clue]
+                line![num.to_string().fg(t.clue_number()), ". ", clue]
             })
             .collect::<Vec<_>>();
 
         let highlight_style = if self.direction == self.puzzle.cursor_direction() {
-            Style::default().black().bold().on_light_yellow()
+            Style::new().fg(t.sel_fg()).bg(t.sel_bg()).bold()
         } else {
-            Style::default().blue().bold().on_gray()
+            Style::new().fg(t.accent()).bg(t.muted).bold()
         };
 
         let clue_list = List::new(lines).highlight_style(highlight_style).block(
             Block::bordered()
+                .border_style(Style::new().fg(t.muted))
                 .title(line![" ", self.direction.to_string(), " clues "].centered())
                 .padding(Padding {
                     left: 2,
@@ -492,12 +496,13 @@ impl Widget for ClueList<'_> {
 }
 
 fn to_ratatui_style(value: SquareStyle) -> Style {
+    let t = theme::current();
     let bg = match value {
-        SquareStyle::Standard => Color::White,
-        SquareStyle::Cursor => Color::LightRed,
-        SquareStyle::Word => Color::LightYellow,
+        SquareStyle::Standard => t.square(),
+        SquareStyle::Cursor => t.cursor(),
+        SquareStyle::Word => t.word(),
     };
-    Style::new().bg(bg).black().bold()
+    Style::new().bg(bg).fg(t.square_fg()).bold()
 }
 
 /// Draws a single square, scaling to whatever `area` it's given (down to 1×1).
@@ -507,7 +512,7 @@ fn render_square(square: Square, style: Style, area: Rect, buf: &mut Buffer) {
     }
 
     let fill = match square {
-        Square::Black => Style::new().bg(Color::Black),
+        Square::Black => Style::new().bg(theme::current().block()),
         _ => style,
     };
     for y in area.y..area.y + area.height {

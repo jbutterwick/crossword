@@ -10,9 +10,11 @@ use crossword::Puzzle;
 use ratatui::DefaultTerminal;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::widgets::Widget;
+use ratatui::style::Style;
+use ratatui::widgets::{Block, Widget};
 
-use crate::screens::{LibraryScreen, SolveScreen, SourcesScreen};
+use crate::screens::{LibraryScreen, SolveScreen, SourcesScreen, ThemesScreen};
+use crate::theme;
 
 /// What an active screen asks the [`App`] to do in response to a key press.
 pub enum Transition {
@@ -22,6 +24,7 @@ pub enum Transition {
     Open(PathBuf),
     ToLibrary,
     ToSources,
+    ToThemes,
 }
 
 /// Redraw cadence while idle — keeps the clue marquee moving and stays responsive to keys.
@@ -31,6 +34,7 @@ enum Screen {
     Library(LibraryScreen),
     Sources(SourcesScreen),
     Solve(SolveScreen),
+    Themes(ThemesScreen),
 }
 
 pub struct App {
@@ -80,6 +84,7 @@ impl App {
                             Screen::Library(s) => s.on_key(key),
                             Screen::Sources(s) => s.on_key(key, &self.library_dir),
                             Screen::Solve(s) => s.on_key(key),
+                            Screen::Themes(s) => s.on_key(key),
                         };
                         self.apply(transition);
                     }
@@ -115,6 +120,9 @@ impl App {
             Transition::ToSources => {
                 self.screen = Screen::Sources(SourcesScreen::new());
             }
+            Transition::ToThemes => {
+                self.screen = Screen::Themes(ThemesScreen::new(&self.library_dir));
+            }
         }
     }
 
@@ -129,10 +137,17 @@ impl App {
 
 impl Widget for &mut App {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // Paint the themed background behind every screen.
+        let t = theme::current();
+        Block::new()
+            .style(Style::new().bg(t.bg).fg(t.fg))
+            .render(area, buf);
+
         match &mut self.screen {
             Screen::Library(s) => s.render(area, buf),
             Screen::Sources(s) => s.render(area, buf),
             Screen::Solve(s) => s.render(area, buf),
+            Screen::Themes(s) => s.render(area, buf),
         }
     }
 }

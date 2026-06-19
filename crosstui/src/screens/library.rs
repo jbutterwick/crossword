@@ -9,6 +9,7 @@ use ratatui::widgets::{Block, List, ListState, Padding, Paragraph, StatefulWidge
 
 use crate::app::Transition;
 use crate::storage::{self, Entry, Status};
+use crate::theme;
 
 enum Mode {
     Normal,
@@ -95,6 +96,7 @@ impl LibraryScreen {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => return Transition::Quit,
             KeyCode::Char('s') => return Transition::ToSources,
+            KeyCode::Char('t') => return Transition::ToThemes,
             KeyCode::Down | KeyCode::Char('j') => {
                 self.selected = (self.selected + 1).min(self.entries.len().saturating_sub(1));
             }
@@ -144,29 +146,36 @@ impl LibraryScreen {
     }
 
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
+        let t = theme::current();
         let [title_area, list_area, footer_area] = area.layout(&Layout::vertical([
             Constraint::Length(2),
             Constraint::Fill(1),
             Constraint::Length(2),
         ]));
 
-        Line::from(vec!["Crosstui".light_blue().bold(), " library".bold()])
+        Line::from(vec!["Crosstui".fg(t.accent()).bold(), " library".bold()])
             .centered()
             .render(title_area, buf);
 
         if self.entries.is_empty() {
-            Paragraph::new(
-                "No puzzles yet. Press 's' to download some.".gray(),
-            )
-            .block(Block::bordered().padding(Padding::uniform(1)))
-            .render(list_area, buf);
+            Paragraph::new("No puzzles yet. Press 's' to download some.".fg(t.muted))
+                .block(
+                    Block::bordered()
+                        .border_style(Style::new().fg(t.muted))
+                        .padding(Padding::uniform(1)),
+                )
+                .render(list_area, buf);
         } else {
             let mut list_state = ListState::default();
             list_state.select(Some(self.selected));
             let rows = self.entries.iter().map(entry_line);
             let list = List::new(rows)
-                .highlight_style(Style::default().black().on_light_yellow().bold())
-                .block(Block::bordered().padding(Padding::uniform(1)));
+                .highlight_style(Style::new().fg(t.sel_fg()).bg(t.sel_bg()).bold())
+                .block(
+                    Block::bordered()
+                        .border_style(Style::new().fg(t.muted))
+                        .padding(Padding::uniform(1)),
+                );
             StatefulWidget::render(list, list_area, buf, &mut list_state);
         }
 
@@ -178,19 +187,19 @@ impl LibraryScreen {
                 self.selected_entry()
                     .map(|e| format!("Delete \"{}\"? (y/n)", e.title))
                     .unwrap_or_default()
-                    .red()
+                    .fg(t.red)
                     .bold(),
             ),
             Mode::ConfirmReset => Line::from(
                 self.selected_entry()
                     .map(|e| format!("Reset progress on \"{}\"? (y/n)", e.title))
                     .unwrap_or_default()
-                    .red()
+                    .fg(t.red)
                     .bold(),
             ),
             Mode::Normal => Line::from(
-                "↑/↓ move   Enter open   f favorite   r rename   x reset   d delete   s sources   q quit"
-                    .gray(),
+                "↑/↓ move   Enter open   f favorite   r rename   x reset   d delete   s sources   t themes   q quit"
+                    .fg(t.muted),
             ),
         };
         footer.render(footer_area, buf);
@@ -198,20 +207,21 @@ impl LibraryScreen {
 }
 
 fn entry_line(entry: &Entry) -> Line<'static> {
+    let t = theme::current();
     let star = if entry.favorite { "★ " } else { "  " };
     let status_span: Span<'static> = {
         let label = format!("{:<12}", entry.status.label());
         match entry.status {
-            Status::Complete => label.green(),
-            Status::InProgress => label.yellow(),
-            Status::Unreadable => label.red(),
-            Status::Unsolved => label.gray(),
+            Status::Complete => label.fg(t.green),
+            Status::InProgress => label.fg(t.yellow),
+            Status::Unreadable => label.fg(t.red),
+            Status::Unsolved => label.fg(t.muted),
         }
     };
 
-    let mut spans = vec![star.yellow(), status_span, entry.title.clone().into()];
+    let mut spans = vec![star.fg(t.yellow), status_span, entry.title.clone().into()];
     if !entry.author.is_empty() {
-        spans.push(format!(" — {}", entry.author).gray());
+        spans.push(format!(" — {}", entry.author).fg(t.muted));
     }
     Line::from(spans)
 }
