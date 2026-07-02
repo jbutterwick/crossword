@@ -109,8 +109,7 @@ impl ThemesScreen {
         StatefulWidget::render(list, list_area, buf, &mut list_state);
 
         Paragraph::new(
-            "↑/↓ preview   Enter apply   Esc cancel   (edit themes.toml to customize)"
-                .fg(t.muted),
+            "↑/↓ preview   Enter apply   Esc cancel   (edit themes.toml to customize)".fg(t.muted),
         )
         .render(footer_area, buf);
     }

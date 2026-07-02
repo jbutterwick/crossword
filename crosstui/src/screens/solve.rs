@@ -31,10 +31,30 @@ impl CellSize {
 
 // ponytail: tune these presets to taste; ordered small → large.
 const ZOOM_LEVELS: &[CellSize] = &[
-    CellSize { w: 1, h: 1, gap_x: 0, gap_y: 0 }, // glyph-only
-    CellSize { w: 3, h: 1, gap_x: 1, gap_y: 0 },
-    CellSize { w: 5, h: 2, gap_x: 1, gap_y: 1 },
-    CellSize { w: 7, h: 3, gap_x: 2, gap_y: 1 }, // ~ the original look
+    CellSize {
+        w: 1,
+        h: 1,
+        gap_x: 0,
+        gap_y: 0,
+    }, // glyph-only
+    CellSize {
+        w: 3,
+        h: 1,
+        gap_x: 1,
+        gap_y: 0,
+    },
+    CellSize {
+        w: 5,
+        h: 2,
+        gap_x: 1,
+        gap_y: 1,
+    },
+    CellSize {
+        w: 7,
+        h: 3,
+        gap_x: 2,
+        gap_y: 1,
+    }, // ~ the original look
 ];
 
 enum Zoom {
@@ -73,12 +93,18 @@ pub struct SolveScreen {
     fit_level: usize,
     /// When the screen opened; drives the highlighted-clue marquee.
     opened_at: Instant,
+    /// When the puzzle was first seen solved; drives the confetti burst.
+    solved_at: Option<Instant>,
     /// Grid geometry from the last render, for hit-testing mouse clicks.
     grid_view: Option<GridView>,
 }
 
 /// Milliseconds the marquee dwells on each character position. Lower = faster.
 const MARQUEE_STEP_MS: u128 = 220;
+
+/// How long the confetti rains after a puzzle is solved.
+const CONFETTI_MS: u128 = 5000;
+const CONFETTI_CHARS: &[char] = &['*', '+', 'o', '.', '✦', '❉'];
 
 impl SolveScreen {
     pub fn new(puzzle: Puzzle, path: PathBuf) -> Self {
@@ -89,6 +115,7 @@ impl SolveScreen {
             scroll: (0, 0),
             fit_level: ZOOM_LEVELS.len() - 1,
             opened_at: Instant::now(),
+            solved_at: None,
             grid_view: None,
         }
     }
@@ -226,6 +253,16 @@ impl SolveScreen {
         let [left_area, puzzle_area] = main_area.layout(&horizontal);
 
         self.render_grid(puzzle_area, buf);
+
+        if self.puzzle.is_solved() {
+            let solved_at = *self.solved_at.get_or_insert_with(Instant::now);
+            let elapsed = solved_at.elapsed().as_millis();
+            if elapsed < CONFETTI_MS {
+                render_confetti(puzzle_area, buf, elapsed);
+            }
+        } else {
+            self.solved_at = None;
+        }
 
         let layout = Layout::vertical([
             Constraint::Length(5),
@@ -466,7 +503,11 @@ impl Widget for ClueList<'_> {
                 // The "N. " prefix stays put so the clue number is always visible.
                 let prefix_width = num.to_string().len() + 2;
                 let clue = if highlighted {
-                    marquee(&clue, inner_width.saturating_sub(prefix_width), self.marquee_step)
+                    marquee(
+                        &clue,
+                        inner_width.saturating_sub(prefix_width),
+                        self.marquee_step,
+                    )
                 } else {
                     clue
                 };
@@ -506,6 +547,30 @@ fn to_ratatui_style(value: SquareStyle) -> Style {
     Style::new().bg(bg).fg(t.square_fg()).bold()
 }
 
+/// Rains confetti over `area`. Each particle's column, colour, and glyph are
+/// derived from its index via a cheap integer hash, and it falls with time so
+/// the whole thing animates off the app's redraw tick — no per-frame state.
+fn render_confetti(area: Rect, buf: &mut Buffer, elapsed_ms: u128) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let t = theme::current();
+    let colors = [t.green, t.yellow, t.blue, t.magenta, t.red, t.accent()];
+    // One row of fall per ~80ms.
+    let frame = (elapsed_ms / 80) as u32;
+    // Density: roughly one particle per 10 cells.
+    let count = (area.width as u32 * area.height as u32) / 10;
+    for i in 0..count {
+        let h = i.wrapping_mul(2_654_435_761);
+        let col = area.x + (h % area.width as u32) as u16;
+        let phase = (h >> 8) % area.height as u32;
+        let y = area.y + ((frame + phase) % area.height as u32) as u16;
+        let ch = CONFETTI_CHARS[(h >> 16) as usize % CONFETTI_CHARS.len()];
+        let color = colors[(h >> 20) as usize % colors.len()];
+        buf[(col, y)].set_char(ch).set_fg(color);
+    }
+}
+
 /// Draws a single square, scaling to whatever `area` it's given (down to 1×1).
 fn render_square(square: Square, style: Style, area: Rect, buf: &mut Buffer) {
     if area.width == 0 || area.height == 0 {
@@ -531,7 +596,21 @@ fn render_square(square: Square, style: Style, area: Rect, buf: &mut Buffer) {
 
 #[cfg(test)]
 mod tests {
-    use super::{marquee, scroll_offset};
+    use super::{marquee, render_confetti, scroll_offset};
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn confetti_stays_in_bounds() {
+        // Offset area so we'd catch off-by-one origin bugs, at several frames.
+        let area = Rect::new(3, 2, 20, 10);
+        let mut buf = Buffer::empty(Rect::new(0, 0, 40, 20));
+        for elapsed in [0, 80, 400, 4999] {
+            render_confetti(area, &mut buf, elapsed); // panics on OOB index
+        }
+        // Zero-size area is a no-op, not a panic.
+        render_confetti(Rect::new(0, 0, 0, 0), &mut buf, 100);
+    }
 
     #[test]
     fn marquee_scrolls_overflowing_text() {

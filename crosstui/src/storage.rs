@@ -139,7 +139,11 @@ fn load_favorites(dir: &Path) -> HashSet<String> {
 fn save_favorites(dir: &Path, favorites: &HashSet<String>) -> std::io::Result<()> {
     let mut list: Vec<&String> = favorites.iter().collect();
     list.sort();
-    let body = list.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n");
+    let body = list
+        .iter()
+        .map(|s| s.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     fs::write(dir.join(FAVORITES_FILE), body)
 }
 
@@ -162,7 +166,9 @@ pub fn rename(dir: &Path, old_path: &Path, new_stem: &str) -> std::io::Result<()
     let new_path = dir.join(format!("{new_stem}.puz"));
     fs::rename(old_path, &new_path)?;
 
-    let old_name = old_path.file_name().map(|n| n.to_string_lossy().into_owned());
+    let old_name = old_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned());
     let mut favorites = load_favorites(dir);
     if old_name.is_some_and(|n| favorites.remove(&n)) {
         favorites.insert(format!("{new_stem}.puz"));

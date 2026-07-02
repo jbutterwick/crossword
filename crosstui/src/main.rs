@@ -28,6 +28,10 @@ struct Cli {
 
 fn main() -> io::Result<()> {
     let args = Cli::parse();
+
+    // Best-effort: get the downloader in place before the TUI takes the screen.
+    download::ensure_installed();
+
     let library_dir = storage::library_dir();
 
     // Apply the previously selected theme, if any.

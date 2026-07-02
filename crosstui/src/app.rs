@@ -2,9 +2,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind,
-};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind};
 use crossterm::execute;
 use crossword::Puzzle;
 use ratatui::DefaultTerminal;
@@ -13,7 +11,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::widgets::{Block, Widget};
 
-use crate::screens::{LibraryScreen, SolveScreen, SourcesScreen, ThemesScreen};
+use crate::screens::{BrowseScreen, LibraryScreen, SolveScreen, SourcesScreen, ThemesScreen};
 use crate::theme;
 
 /// What an active screen asks the [`App`] to do in response to a key press.
@@ -25,6 +23,7 @@ pub enum Transition {
     ToLibrary,
     ToSources,
     ToThemes,
+    ToBrowse,
 }
 
 /// Redraw cadence while idle — keeps the clue marquee moving and stays responsive to keys.
@@ -33,6 +32,7 @@ const TICK: Duration = Duration::from_millis(120);
 enum Screen {
     Library(LibraryScreen),
     Sources(SourcesScreen),
+    Browse(BrowseScreen),
     Solve(SolveScreen),
     Themes(ThemesScreen),
 }
@@ -83,6 +83,7 @@ impl App {
                         let transition = match &mut self.screen {
                             Screen::Library(s) => s.on_key(key),
                             Screen::Sources(s) => s.on_key(key, &self.library_dir),
+                            Screen::Browse(s) => s.on_key(key, &self.library_dir),
                             Screen::Solve(s) => s.on_key(key),
                             Screen::Themes(s) => s.on_key(key),
                         };
@@ -123,6 +124,9 @@ impl App {
             Transition::ToThemes => {
                 self.screen = Screen::Themes(ThemesScreen::new(&self.library_dir));
             }
+            Transition::ToBrowse => {
+                self.screen = Screen::Browse(BrowseScreen::new());
+            }
         }
     }
 
@@ -146,6 +150,7 @@ impl Widget for &mut App {
         match &mut self.screen {
             Screen::Library(s) => s.render(area, buf),
             Screen::Sources(s) => s.render(area, buf),
+            Screen::Browse(s) => s.render(area, buf),
             Screen::Solve(s) => s.render(area, buf),
             Screen::Themes(s) => s.render(area, buf),
         }

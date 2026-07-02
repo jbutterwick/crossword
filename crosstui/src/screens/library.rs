@@ -96,6 +96,7 @@ impl LibraryScreen {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => return Transition::Quit,
             KeyCode::Char('s') => return Transition::ToSources,
+            KeyCode::Char('c') => return Transition::ToBrowse,
             KeyCode::Char('t') => return Transition::ToThemes,
             KeyCode::Down | KeyCode::Char('j') => {
                 self.selected = (self.selected + 1).min(self.entries.len().saturating_sub(1));
@@ -198,7 +199,7 @@ impl LibraryScreen {
                     .bold(),
             ),
             Mode::Normal => Line::from(
-                "↑/↓ move   Enter open   f favorite   r rename   x reset   d delete   s sources   t themes   q quit"
+                "↑/↓ move   Enter open   f favorite   r rename   x reset   d delete   s sources   c crosshare   t themes   q quit"
                     .fg(t.muted),
             ),
         };
