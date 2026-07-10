@@ -97,6 +97,8 @@ pub struct SolveScreen {
     solved_at: Option<Instant>,
     /// Grid geometry from the last render, for hit-testing mouse clicks.
     grid_view: Option<GridView>,
+    /// When true, entered letters that disagree with the solution are tinted red.
+    show_incorrect: bool,
 }
 
 /// Milliseconds the marquee dwells on each character position. Lower = faster.
@@ -117,6 +119,7 @@ impl SolveScreen {
             opened_at: Instant::now(),
             solved_at: None,
             grid_view: None,
+            show_incorrect: false,
         }
     }
 
@@ -149,6 +152,7 @@ impl SolveScreen {
             KeyCode::Char('+') | KeyCode::Char('=') => self.zoom_in(),
             KeyCode::Char('-') | KeyCode::Char('_') => self.zoom_out(),
             KeyCode::Char('0') => self.zoom = Zoom::Fit,
+            KeyCode::Char('?') => self.show_incorrect = !self.show_incorrect,
             KeyCode::Char(letter) => {
                 if letter.is_ascii_alphabetic() {
                     self.puzzle.add_letter(letter);
@@ -281,7 +285,7 @@ impl SolveScreen {
 
         let instructions = line![
             "Instructions: ".bold(),
-            "Arrows/space/tab to navigate. +/- to zoom, 0 to fit. Escape returns to the library."
+            "Arrows/space/tab to navigate. +/- to zoom, 0 to fit. ? checks for wrong letters. Escape returns to the library."
                 .fg(t.muted),
         ];
         Paragraph::new(instructions)
@@ -404,7 +408,10 @@ impl SolveScreen {
                     height: cell.h,
                 };
                 let square = self.puzzle.grid().get((r, c));
-                let style = to_ratatui_style(self.puzzle.square_style((r, c)));
+                let mut style = to_ratatui_style(self.puzzle.square_style((r, c)));
+                if self.show_incorrect && self.puzzle.is_incorrect((r, c)) {
+                    style = style.fg(theme::current().red);
+                }
                 render_square(square, style, cell_rect.intersection(area), buf);
             }
         }

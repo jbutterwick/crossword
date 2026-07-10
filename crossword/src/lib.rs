@@ -137,6 +137,13 @@ impl Puzzle {
         clues
     }
 
+    /// Whether the letter entered at `pos` disagrees with the solution. Empty
+    /// and black squares are never incorrect.
+    pub fn is_incorrect(&self, pos: Pos) -> bool {
+        matches!(self.grid().get(pos), Square::Letter(_))
+            && self.grid().get(pos) != self.puz.solution.get(pos)
+    }
+
     /// Determines how a particular square should be styled.
     /// See [SquareStyle].
     pub fn square_style(&self, pos: Pos) -> SquareStyle {
@@ -887,6 +894,27 @@ mod tests {
         assert!(!puzzle.is_started());
         // Black squares are untouched, so the grid still matches the solution shape.
         assert_eq!(puzzle.grid().size(), puzzle.puz.solution.size());
+    }
+
+    #[test]
+    fn is_incorrect_flags_only_wrong_letters() {
+        let data = std::fs::read("puzzles/version-1.2-puzzle.puz").unwrap();
+        let (mut puzzle, _) = Puzzle::parse(data).unwrap();
+        puzzle.reset();
+
+        // The first white square, empty: never incorrect.
+        let pos = puzzle.grid().positions().find(|&p| puzzle.grid().get(p).is_white()).unwrap();
+        assert!(!puzzle.is_incorrect(pos));
+
+        // Whatever the solution is here, a different letter is wrong and the
+        // right one is not.
+        let Square::Letter(sol) = puzzle.puz.solution.get(pos) else { unreachable!() };
+        let wrong = if sol == 'Z' { 'A' } else { 'Z' };
+        puzzle.move_cursor_to(pos);
+        puzzle.add_letter(wrong);
+        assert!(puzzle.is_incorrect(pos));
+        puzzle.add_letter(sol);
+        assert!(!puzzle.is_incorrect(pos));
     }
 
     #[test]
