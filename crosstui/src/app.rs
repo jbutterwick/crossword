@@ -119,7 +119,7 @@ impl App {
                 self.screen = Screen::Library(LibraryScreen::new(&self.library_dir));
             }
             Transition::ToSources => {
-                self.screen = Screen::Sources(SourcesScreen::new());
+                self.screen = Screen::Sources(SourcesScreen::new(&self.library_dir));
             }
             Transition::ToThemes => {
                 self.screen = Screen::Themes(ThemesScreen::new(&self.library_dir));

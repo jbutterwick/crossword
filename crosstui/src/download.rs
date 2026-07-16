@@ -3,10 +3,13 @@
 //! scraping and `.puz` conversion we don't want to reimplement.
 
 use std::io::ErrorKind;
-use std::path::Path;
-use std::process::Command;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
 
+use chrono::Local;
 use crossword::Puzzle;
+
+use crate::storage;
 
 /// A downloadable puzzle outlet. `keyword` is the `xword-dl` outlet name;
 /// `about` is a one-line hint shown in the UI.
@@ -119,19 +122,71 @@ pub const SOURCES: &[Source] = &[
 
 const NOT_INSTALLED: &str = "xword-dl not installed — run: pipx install xword-dl";
 
-/// Fetches a puzzle for `keyword` into `dir`. `date` (`YYYY-MM-DD`) requests an
-/// older puzzle where the outlet supports it; `None` gets the latest. Blocks
-/// until the subprocess finishes.
-// ponytail: synchronous; the UI freezes for the (brief) download. Move to a
-// background thread + channel only if it starts to feel slow.
-pub fn download(dir: &Path, keyword: &str, date: Option<&str>) -> Result<(), String> {
+/// Puzzle metadata and bytes fetched from an outlet. Keeping the bytes lets the
+/// sources screen show the title/author before the user chooses to save it.
+#[derive(Clone)]
+pub struct FetchedPuzzle {
+    pub title: String,
+    pub author: String,
+    bytes: Vec<u8>,
+}
+
+pub fn today() -> String {
+    Local::now().format("%Y-%m-%d").to_string()
+}
+
+/// Fetches a source puzzle without adding it to the library.
+pub fn fetch_source(keyword: &str, date: Option<&str>) -> Result<FetchedPuzzle, String> {
     let mut cmd = Command::new("xword-dl");
     cmd.arg(keyword);
     if let Some(d) = date {
         cmd.args(["-d", d]);
     }
-    cmd.current_dir(dir);
-    run(&mut cmd)
+    // stdout mode gives us the `.puz` itself, allowing metadata to be shown
+    // before saving and avoiding fragile filename detection.
+    cmd.args(["--output", "-"]);
+    fetched_from_output(run_output(&mut cmd)?)
+}
+
+/// Saves fetched source data and records its provenance in the library sidecar.
+pub fn save_source(
+    dir: &Path,
+    source: &Source,
+    puzzle_date: &str,
+    fetched: &FetchedPuzzle,
+) -> Result<PathBuf, String> {
+    let title = if fetched.title.trim().is_empty() {
+        "Crossword"
+    } else {
+        fetched.title.trim()
+    };
+    let stem = sanitize(&format!("{} - {puzzle_date} - {title}", source.name));
+    let path = available_path(dir, &stem);
+    std::fs::write(&path, &fetched.bytes).map_err(|e| e.to_string())?;
+    if let Err(e) = storage::record_download(
+        dir,
+        &path,
+        source.name,
+        Some(source.keyword),
+        Some(puzzle_date),
+    ) {
+        let _ = std::fs::remove_file(&path);
+        return Err(e.to_string());
+    }
+    Ok(path)
+}
+
+/// Fetches and saves a puzzle. `date` requests an older puzzle where supported;
+/// `None` gets the latest and associates it with today's source listing.
+pub fn download(dir: &Path, keyword: &str, date: Option<&str>) -> Result<FetchedPuzzle, String> {
+    let source = SOURCES
+        .iter()
+        .find(|source| source.keyword == keyword)
+        .ok_or_else(|| format!("unknown source: {keyword}"))?;
+    let fetched = fetch_source(keyword, date)?;
+    let puzzle_date = date.map(str::to_string).unwrap_or_else(today);
+    save_source(dir, source, &puzzle_date, &fetched)?;
+    Ok(fetched)
 }
 
 /// Downloads a puzzle from an arbitrary `url`. Direct `.puz` links are fetched
@@ -145,7 +200,16 @@ pub fn download_url(dir: &Path, url: &str) -> Result<(), String> {
     if is_puz_url(url) {
         fetch_puz(dir, url)
     } else {
-        run(Command::new("xword-dl").arg(url).current_dir(dir))
+        let output = run_output(Command::new("xword-dl").arg(url).args(["--output", "-"]))?;
+        let fetched = fetched_from_output(output)?;
+        let stem = sanitize(if fetched.title.is_empty() {
+            "Downloaded crossword"
+        } else {
+            &fetched.title
+        });
+        let dest = available_path(dir, &stem);
+        std::fs::write(&dest, fetched.bytes).map_err(|e| e.to_string())?;
+        storage::record_download(dir, &dest, "Web URL", None, None).map_err(|e| e.to_string())
     }
 }
 
@@ -186,9 +250,15 @@ fn is_puz_url(url: &str) -> bool {
 /// Fetches a direct `.puz` link with curl and confirms it parses before keeping
 /// it, so a redirected HTML error page never lands in the library as a puzzle.
 fn fetch_puz(dir: &Path, url: &str) -> Result<(), String> {
-    let dest = dir.join(url_filename(url));
+    let filename = url_filename(url);
+    let stem = Path::new(&filename)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("downloaded");
+    let dest = available_path(dir, stem);
     curl_to(&dest, url)?;
-    validate_puz(&dest)
+    validate_puz(&dest)?;
+    storage::record_download(dir, &dest, "Direct URL", None, None).map_err(|e| e.to_string())
 }
 
 // --- Crosshare -------------------------------------------------------------
@@ -260,9 +330,11 @@ pub fn list_crosshare(feed: &CrosshareFeed, page: usize) -> Result<Vec<Crosshare
 /// Downloads a Crosshare puzzle by id into `dir`, naming the file after its
 /// title, and validates it.
 pub fn download_crosshare(dir: &Path, id: &str, title: &str) -> Result<(), String> {
-    let dest = dir.join(format!("{}.puz", sanitize(title)));
+    let dest = available_path(dir, &sanitize(title));
     curl_to(&dest, &format!("{CROSSHARE}/api/puz/{id}"))?;
-    validate_puz(&dest)
+    validate_puz(&dest)?;
+    storage::record_download(dir, &dest, "Crosshare", Some("crosshare"), None)
+        .map_err(|e| e.to_string())
 }
 
 /// Pulls unique `/crosswords/{id}/{slug}` links out of a listing page, in order.
@@ -331,6 +403,7 @@ fn validate_puz(dest: &Path) -> Result<(), String> {
 fn sanitize(name: &str) -> String {
     let cleaned: String = name
         .chars()
+        .take(100)
         .map(|c| {
             if c.is_alphanumeric() || c == ' ' || c == '-' {
                 c
@@ -358,13 +431,37 @@ fn url_filename(url: &str) -> String {
     }
 }
 
+fn available_path(dir: &Path, stem: &str) -> PathBuf {
+    let first = dir.join(format!("{stem}.puz"));
+    if !first.exists() {
+        return first;
+    }
+    for suffix in 2.. {
+        let candidate = dir.join(format!("{stem} ({suffix}).puz"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
+fn fetched_from_output(out: Output) -> Result<FetchedPuzzle, String> {
+    let (puzzle, _) = Puzzle::parse(out.stdout.clone())
+        .map_err(|_| "source didn't return a valid .puz file".to_string())?;
+    Ok(FetchedPuzzle {
+        title: puzzle.title().to_string(),
+        author: puzzle.author().to_string(),
+        bytes: out.stdout,
+    })
+}
+
 /// Runs an `xword-dl` command, mapping a missing binary and non-zero exits to
 /// friendly messages.
-fn run(cmd: &mut Command) -> Result<(), String> {
+fn run_output(cmd: &mut Command) -> Result<Output, String> {
     match cmd.output() {
         Err(e) if e.kind() == ErrorKind::NotFound => Err(NOT_INSTALLED.to_string()),
         Err(e) => Err(e.to_string()),
-        Ok(out) if out.status.success() => Ok(()),
+        Ok(out) if out.status.success() => Ok(out),
         Ok(out) => Err(last_line(&out.stderr, "download failed")),
     }
 }

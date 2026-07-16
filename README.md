@@ -27,10 +27,12 @@ confetti burst celebrates when you complete the puzzle.
 
 The explorer is a library of the puzzles you've collected, stored under your
 platform data directory (e.g. `~/.local/share/crosstui`). It shows each
-puzzle's title and solve status (unsolved, in progress, or complete), and lets
-you manage them entirely from the keyboard:
+puzzle's title, author, source, download date, and solve status, and lets you
+manage the collection entirely from the keyboard:
 
 - `↑`/`↓` move, `Enter` opens the selected puzzle
+- `/` searches titles, authors, and sources; `v` filters; `o` changes sorting;
+  `z` clears the current view
 - `f` favorite, `r` rename, `x` reset progress, `d` delete
 - `s` opens **sources** — the outlet downloader (see below)
 - `c` opens the **Crosshare browser** — browse an actual list of puzzles (see below)
@@ -46,8 +48,11 @@ The sources screen (`s`) pulls puzzles straight into your library:
 
 - Nearly twenty outlets — Newsday, USA Today, Universal, LA Times (+ Mini),
   The New Yorker (+ Mini), Washington Post, The Atlantic, Vox, Vulture, the
-  Guardian (quick/cryptic/everyman), Puzzmo, and more — each with a short
-  description. `Enter` grabs the latest.
+  Guardian (quick/cryptic/everyman), Puzzmo, and more. Today's title and author
+  are loaded in the background, with a clear marker when the puzzle is already
+  in your library. `Enter` downloads the selected source.
+- `A` downloads today's puzzle from every source that is not already in the
+  library.
 - `d` fetches an **older** puzzle by date (`YYYY-MM-DD`), for outlets whose
   archives support it.
 - `u` downloads from a **URL** you paste in: a direct `.puz` link is fetched and
