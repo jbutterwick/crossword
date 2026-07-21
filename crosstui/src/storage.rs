@@ -62,6 +62,8 @@ pub struct Entry {
     pub title: String,
     pub author: String,
     pub source: String,
+    /// Grid dimensions (e.g. `15×15`); empty when the file is unreadable.
+    pub size: String,
     /// Local download/import date, formatted as `YYYY-MM-DD`.
     pub downloaded: String,
     pub status: Status,
@@ -144,6 +146,7 @@ fn read_entry(path: PathBuf, favorite: bool, metadata: Option<&PuzzleMetadata>) 
                 path,
                 title,
                 author: puzzle.author().to_string(),
+                size: format!("{}×{}", puzzle.grid().width(), puzzle.grid().height()),
                 source,
                 downloaded,
                 status,
@@ -153,6 +156,7 @@ fn read_entry(path: PathBuf, favorite: bool, metadata: Option<&PuzzleMetadata>) 
         _ => Entry {
             title: file_stem(&path),
             author: String::new(),
+            size: String::new(),
             source,
             downloaded,
             status: Status::Unreadable,

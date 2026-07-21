@@ -128,6 +128,8 @@ const NOT_INSTALLED: &str = "xword-dl not installed — run: pipx install xword-
 pub struct FetchedPuzzle {
     pub title: String,
     pub author: String,
+    /// Grid dimensions, e.g. `15×15`.
+    pub size: String,
     bytes: Vec<u8>,
 }
 
@@ -451,6 +453,7 @@ fn fetched_from_output(out: Output) -> Result<FetchedPuzzle, String> {
     Ok(FetchedPuzzle {
         title: puzzle.title().to_string(),
         author: puzzle.author().to_string(),
+        size: format!("{}×{}", puzzle.grid().width(), puzzle.grid().height()),
         bytes: out.stdout,
     })
 }

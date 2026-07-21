@@ -367,7 +367,7 @@ impl LibraryScreen {
                 .block(
                     Block::bordered()
                         .border_style(Style::new().fg(t.muted))
-                        .title(" ★  Status       Downloaded   Source               Puzzle ")
+                        .title(" ★  Status       Downloaded   Source               Size    Puzzle ")
                         .padding(Padding::horizontal(1)),
                 );
             StatefulWidget::render(list, list_area, buf, &mut list_state);
@@ -448,6 +448,7 @@ fn entry_line(entry: &Entry) -> Line<'static> {
         status_span,
         format!("{:<13}", entry.downloaded).fg(t.muted),
         format!("{:<21}", truncate(&entry.source, 19)).fg(t.accent()),
+        format!("{:<8}", entry.size).fg(t.muted),
         entry.title.clone().into(),
     ];
     if !entry.author.is_empty() {

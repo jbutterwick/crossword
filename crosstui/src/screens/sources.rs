@@ -36,6 +36,7 @@ impl From<Result<(), String>> for DownloadState {
 struct PuzzleSummary {
     title: String,
     author: String,
+    size: String,
 }
 
 impl From<&FetchedPuzzle> for PuzzleSummary {
@@ -43,6 +44,7 @@ impl From<&FetchedPuzzle> for PuzzleSummary {
         Self {
             title: puzzle.title.clone(),
             author: puzzle.author.clone(),
+            size: puzzle.size.clone(),
         }
     }
 }
@@ -91,6 +93,7 @@ impl SourcesScreen {
             .map(|entry| PuzzleSummary {
                 title: entry.title,
                 author: entry.author,
+                size: entry.size,
             })
             .collect();
         let (tx, rx) = mpsc::channel();
@@ -102,6 +105,7 @@ impl SourcesScreen {
                 states.push(TodayState::Owned(PuzzleSummary {
                     title: entry.title,
                     author: entry.author,
+                    size: entry.size,
                 }));
             } else {
                 states.push(TodayState::Checking);
@@ -378,34 +382,44 @@ impl SourcesScreen {
 
         let mut list_state = ListState::default();
         list_state.select(Some(self.selected));
-        let puzzle_width = (list_area.width as usize).saturating_sub(42).max(12);
+        let puzzle_width = (list_area.width as usize).saturating_sub(50).max(12);
         let rows = SOURCES.iter().enumerate().map(|(index, source)| {
-            let (puzzle, puzzle_color, status) = match &self.states[index] {
-                TodayState::Checking => {
-                    (source.about.to_string(), t.muted, "◌ checking…".fg(t.muted))
-                }
+            let (puzzle, puzzle_color, size, status) = match &self.states[index] {
+                TodayState::Checking => (
+                    source.about.to_string(),
+                    t.muted,
+                    "",
+                    "◌ checking…".fg(t.muted),
+                ),
                 TodayState::Available(info) => (
                     puzzle_label(&info.title, &info.author, puzzle_width.saturating_sub(2)),
                     t.fg,
+                    info.size.as_str(),
                     "↓ ready".fg(t.accent()),
                 ),
                 TodayState::Owned(info) => (
                     puzzle_label(&info.title, &info.author, puzzle_width.saturating_sub(2)),
                     t.fg,
+                    info.size.as_str(),
                     "✓ in library".fg(t.green),
                 ),
                 TodayState::Downloading => (
                     source.about.to_string(),
                     t.muted,
+                    "",
                     "↓ downloading…".fg(t.yellow),
                 ),
-                TodayState::Failed(_) => {
-                    (source.about.to_string(), t.muted, "— unavailable".fg(t.red))
-                }
+                TodayState::Failed(_) => (
+                    source.about.to_string(),
+                    t.muted,
+                    "",
+                    "— unavailable".fg(t.red),
+                ),
             };
             line![
                 format!("{:<22}", source.name),
                 format!("{puzzle:<puzzle_width$}").fg(puzzle_color),
+                format!("{size:<8}").fg(t.muted),
                 status
             ]
         });
@@ -415,7 +429,7 @@ impl SourcesScreen {
             .block(
                 Block::bordered()
                     .border_style(Style::new().fg(t.muted))
-                    .title(" Source                 Today’s puzzle / author                              Status ")
+                    .title(" Source                 Today’s puzzle / author                Size    Status ")
                     .padding(Padding::horizontal(1)),
             );
         StatefulWidget::render(list, list_area, buf, &mut list_state);
